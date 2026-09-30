@@ -1,0 +1,65 @@
+rules_version = '2';
+
+// Regras de segurança do ESG Campo.
+// Cole este arquivo em: Firebase Console → Firestore Database → Regras → Publicar.
+//
+// Perfis (documento users/{uid}):
+//   admin      → lê e altera tudo; cadastra usuários e questionários.
+//   orientador → lê questionários e propriedades; cria/edita apenas as próprias visitas e fotos.
+// Usuário com active == false perde todo o acesso.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function profile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function isActive() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && profile().active == true;
+    }
+    function isAdmin() { return isActive() && profile().role == 'admin'; }
+    function isOrientador() { return isActive() && profile().role == 'orientador'; }
+    function ownsNew() { return request.resource.data.orientadorUid == request.auth.uid; }
+    function ownsExisting() { return resource.data.orientadorUid == request.auth.uid; }
+
+    match /users/{uid} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /settings/{id} {
+      allow read: if isActive();
+      allow write: if isAdmin();
+    }
+
+    match /questionnaires/{id} {
+      allow read: if isActive();
+      allow write: if isAdmin();
+    }
+
+    match /properties/{id} {
+      allow read: if isActive();
+      allow create: if isAdmin() || (isOrientador() && request.resource.data.createdBy == request.auth.uid);
+      allow update: if isAdmin() || isOrientador();
+      allow delete: if isAdmin();
+    }
+
+    match /visits/{id} {
+      allow read: if isAdmin() || (isOrientador() && ownsExisting());
+      allow create: if isOrientador() && ownsNew();
+      // O orientador não pode alterar a revisão feita pela coordenação.
+      allow update: if isAdmin()
+        || (isOrientador() && ownsExisting() && ownsNew()
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['review']));
+      allow delete: if isAdmin();
+    }
+
+    match /photos/{id} {
+      allow read: if isAdmin() || (isOrientador() && ownsExisting());
+      allow create: if isOrientador() && ownsNew() && request.resource.data.data.size() < 1000000;
+      allow update: if isOrientador() && ownsExisting() && ownsNew();
+      allow delete: if isAdmin() || (isOrientador() && ownsExisting());
+    }
+  }
+}

@@ -23,6 +23,7 @@ try {
       $rel = [Uri]::UnescapeDataString($ctx.Request.Url.AbsolutePath.TrimStart('/'))
       if ([string]::IsNullOrEmpty($rel)) { $rel = 'index.html' }
       $file = [IO.Path]::GetFullPath((Join-Path $root $rel))
+      if (Test-Path -LiteralPath $file -PathType Container) { $file = Join-Path $file 'index.html' }
       if ($file.StartsWith($root) -and (Test-Path -LiteralPath $file -PathType Leaf)) {
         $ext = [IO.Path]::GetExtension($file).ToLower()
         $type = $mime[$ext]
